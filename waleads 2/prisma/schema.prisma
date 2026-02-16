@@ -1,0 +1,475 @@
+// WALeads - Schema Database Completo
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ AUTH & WORKSPACE ============
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  emailVerified DateTime?
+  name          String?
+  password      String?
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberships   Membership[]
+  auditLogs     AuditLog[]
+  
+  @@index([email])
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships         Membership[]
+  integrationWA       IntegrationWhatsApp?
+  integrationMeta     IntegrationMeta?
+  playbook            Playbook?
+  contacts            Contact[]
+  conversations       Conversation[]
+  messages            Message[]
+  leadProfiles        LeadProfile[]
+  billingCustomer     BillingCustomer?
+  wallet              Wallet?
+  webhookEvents       WebhookEvent[]
+  auditLogs           AuditLog[]
+  
+  @@index([slug])
+}
+
+enum MembershipRole {
+  OWNER
+  MEMBER
+}
+
+model Membership {
+  id          String         @id @default(cuid())
+  role        MembershipRole @default(MEMBER)
+  createdAt   DateTime       @default(now())
+  
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+// ============ INTEGRAZIONI ============
+
+enum IntegrationStatus {
+  ACTIVE
+  ERROR
+  DISCONNECTED
+}
+
+model IntegrationWhatsApp {
+  id              String            @id @default(cuid())
+  status          IntegrationStatus @default(DISCONNECTED)
+  
+  accessToken     String?
+  phoneNumberId   String?
+  wabaId          String?
+  verifyToken     String?
+  phoneNumber     String?
+  
+  lastError       String?
+  lastHealthCheck DateTime?
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  workspaceId     String            @unique
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+  @@index([status])
+}
+
+model IntegrationMeta {
+  id              String            @id @default(cuid())
+  status          IntegrationStatus @default(DISCONNECTED)
+  
+  accessToken     String?
+  pageId          String?
+  pageName        String?
+  formId          String?
+  formName        String?
+  
+  fieldMapping    Json?
+  
+  lastError       String?
+  lastHealthCheck DateTime?
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  workspaceId     String            @unique
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+  @@index([status])
+}
+
+// ============ CONTACTS & CONVERSATIONS ============
+
+model Contact {
+  id          String   @id @default(cuid())
+  
+  phone       String
+  name        String?
+  email       String?
+  
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  conversations Conversation[]
+  leadProfile   LeadProfile?
+  
+  @@unique([workspaceId, phone])
+  @@index([workspaceId])
+  @@index([phone])
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+  HANDOFF
+}
+
+model Conversation {
+  id              String             @id @default(cuid())
+  status          ConversationStatus @default(ACTIVE)
+  
+  autoReplyEnabled Boolean           @default(true)
+  handoffActive    Boolean           @default(false)
+  
+  tags            String[]
+  notes           String?
+  
+  lastMessageAt   DateTime?
+  
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  
+  workspaceId     String
+  workspace       Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  contactId       String
+  contact         Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  messages        Message[]
+  
+  @@index([workspaceId])
+  @@index([contactId])
+  @@index([status])
+  @@index([lastMessageAt])
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Message {
+  id              String          @id @default(cuid())
+  direction       MessageDirection
+  status          MessageStatus   @default(PENDING)
+  
+  externalId      String?         @unique
+  
+  content         String
+  metadata        Json?
+  
+  errorMessage    String?
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  workspaceId     String
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  conversationId  String
+  conversation    Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+  @@index([conversationId])
+  @@index([externalId])
+  @@index([createdAt])
+}
+
+// ============ LEAD PROFILES ============
+
+enum LeadStatus {
+  NEW
+  QUALIFYING
+  QUALIFIED
+  NOT_QUALIFIED
+  HANDOFF
+}
+
+model LeadProfile {
+  id              String      @id @default(cuid())
+  status          LeadStatus  @default(NEW)
+  
+  answers         Json        @default("{}")
+  
+  qualificationScore Int?
+  
+  leadSource      String?
+  leadMetadata    Json?
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  workspaceId     String
+  workspace       Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  contactId       String      @unique
+  contact         Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+  @@index([status])
+}
+
+// ============ PLAYBOOK ============
+
+model Playbook {
+  id              String   @id @default(cuid())
+  
+  offerDescription String  @default("")
+  
+  faq             Json     @default("[]")
+  
+  tone            String   @default("formale")
+  
+  ctaMessage      String   @default("Perfetto! Un nostro operatore ti contatterà presto.")
+  
+  qualifyQuestions Json    @default("[]")
+  
+  initialMessage  String?
+  
+  handoffTriggers String[] @default([])
+  
+  autoReplyGlobal Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  workspaceId     String   @unique
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+}
+
+// ============ BILLING ============
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  TRIALING
+}
+
+model BillingCustomer {
+  id                    String              @id @default(cuid())
+  
+  stripeCustomerId      String              @unique
+  stripeSubscriptionId  String?             @unique
+  
+  subscriptionStatus    SubscriptionStatus?
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean             @default(false)
+  
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  
+  workspaceId           String              @unique
+  workspace             Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  payments              Payment[]
+  
+  @@index([workspaceId])
+  @@index([stripeCustomerId])
+}
+
+enum PaymentType {
+  SUBSCRIPTION
+  CREDIT_TOPUP
+  REFUND
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id                  String         @id @default(cuid())
+  type                PaymentType
+  status              PaymentStatus  @default(PENDING)
+  
+  amount              Int
+  currency            String         @default("eur")
+  
+  stripePaymentIntent String?        @unique
+  stripeInvoiceId     String?
+  
+  metadata            Json?
+  
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  
+  billingCustomerId   String
+  billingCustomer     BillingCustomer @relation(fields: [billingCustomerId], references: [id], onDelete: Cascade)
+  
+  @@index([billingCustomerId])
+  @@index([stripePaymentIntent])
+}
+
+// ============ WALLET ============
+
+model Wallet {
+  id          String   @id @default(cuid())
+  
+  balance     Int      @default(0)
+  
+  costPerMessage Int   @default(10)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  workspaceId String   @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  ledger      WalletLedger[]
+  
+  @@index([workspaceId])
+}
+
+enum LedgerType {
+  TOPUP
+  USAGE
+  REFUND
+  ADJUSTMENT
+}
+
+model WalletLedger {
+  id          String     @id @default(cuid())
+  type        LedgerType
+  
+  amount      Int
+  
+  description String
+  metadata    Json?
+  
+  createdAt   DateTime   @default(now())
+  
+  walletId    String
+  wallet      Wallet     @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  
+  @@index([walletId])
+  @@index([createdAt])
+}
+
+// ============ WEBHOOK EVENTS ============
+
+enum WebhookSource {
+  WHATSAPP
+  META_LEADGEN
+  STRIPE
+}
+
+model WebhookEvent {
+  id          String        @id @default(cuid())
+  source      WebhookSource
+  
+  eventType   String
+  payload     Json
+  
+  processed   Boolean       @default(false)
+  processedAt DateTime?
+  error       String?
+  
+  createdAt   DateTime      @default(now())
+  
+  workspaceId String?
+  workspace   Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+  @@index([processed])
+  @@index([source])
+  @@index([createdAt])
+}
+
+// ============ AUDIT LOG ============
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  
+  action      String
+  entityType  String?
+  entityId    String?
+  
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============ FOUNDER AUTH ============
+
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  @@index([email])
+  @@index([code])
+  @@index([expiresAt])
+}
